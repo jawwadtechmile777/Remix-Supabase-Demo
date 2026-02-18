@@ -12,6 +12,20 @@ import { createServerClient } from "~/lib/supabase.server";
 import { appendSetCookieHeaders } from "~/lib/cookie.server";
 import { supabase } from "~/lib/supabase.client";
 
+type ProfileRole = "admin" | "user";
+type UsersLoaderData = { users: any[]; role: ProfileRole };
+
+async function getProfileRole(supabaseServer: any, userId: string): Promise<ProfileRole> {
+  const { data, error } = await supabaseServer
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) return "user";
+  return data?.role === "admin" ? "admin" : "user";
+}
+
 // 🔐 AUTH CHECK + LOAD USERS (session from cookies via @supabase/ssr)
 export async function loader({ request }: any) {
   const { supabase, getSetCookieHeaders } = createServerClient(request);
@@ -26,18 +40,29 @@ export async function loader({ request }: any) {
     return res;
   }
 
-  const { data, error } = await supabase
+  const role = await getProfileRole(supabase, user.id);
+  const isAdmin = role === "admin";
+
+  let query = supabase
     .from("users")
     .select("*")
-    // Defense-in-depth: even with RLS, only load the signed-in user's rows
-    .eq("user_id", user.id)
     .order("created_at", { ascending: false });
+
+  // Non-admins only see their own rows (admin sees all)
+  if (!isAdmin) {
+    query = query.eq("user_id", user.id);
+  }
+
+  const { data, error } = await query;
 
   if (error) throw new Error(error.message);
 
   const headers = new Headers();
   appendSetCookieHeaders(headers, getSetCookieHeaders());
-  return dataResponse(data, { headers });
+  return dataResponse(
+    { users: data ?? [], role } satisfies UsersLoaderData,
+    { headers }
+  );
 }
 
 // 🔹 ACTION
@@ -53,6 +78,9 @@ export async function action({ request }: any) {
     appendSetCookieHeaders(res.headers, getSetCookieHeaders());
     return res;
   }
+
+  const role = await getProfileRole(supabase, user.id);
+  const isAdmin = role === "admin";
 
   const formData = await request.formData();
   const intent = formData.get("intent");
@@ -72,7 +100,9 @@ export async function action({ request }: any) {
 
   if (intent === "delete") {
     const id = formData.get("id");
-    await supabase.from("users").delete().eq("id", id).eq("user_id", user.id);
+    let del = supabase.from("users").delete().eq("id", id);
+    if (!isAdmin) del = del.eq("user_id", user.id);
+    await del;
   }
 
   if (intent === "update") {
@@ -80,11 +110,12 @@ export async function action({ request }: any) {
     const name = String(formData.get("name") ?? "").trim();
     const email = String(formData.get("email") ?? "").trim();
 
-    await supabase
+    let upd = supabase
       .from("users")
       .update({ name, email, updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .eq("user_id", user.id);
+      .eq("id", id);
+    if (!isAdmin) upd = upd.eq("user_id", user.id);
+    await upd;
   }
 
   const res = redirect("/users");
@@ -93,7 +124,7 @@ export async function action({ request }: any) {
 }
 
 export default function Users() {
-  const users = useLoaderData<typeof loader>();
+  const { users, role } = useLoaderData() as UsersLoaderData;
   const navigation = useNavigation();
   const navigate = useNavigate();
   const formRef = useRef<HTMLFormElement>(null);
@@ -133,7 +164,9 @@ export default function Users() {
               User Management
             </h1>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Only rows owned by your account are visible and editable.
+              {role === "admin"
+                ? "Admin view: you can see and manage all users."
+                : "User view: you can only see and manage your own users."}
             </p>
           </div>
 
@@ -225,7 +258,7 @@ export default function Users() {
         <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Your People List
+              {role === "admin" ? "All People" : "Your People"}
             </h2>
             <span className="text-sm text-gray-500 dark:text-gray-400">
               {Array.isArray(users) ? users.length : 0} total
