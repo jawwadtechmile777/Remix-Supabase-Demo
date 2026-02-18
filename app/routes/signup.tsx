@@ -3,6 +3,39 @@ import { supabase } from "~/lib/supabase.client";
 import { useNavigate, Link } from "react-router";
 import { Loader2, UserPlus } from "lucide-react";
 
+function formatSupabaseAuthError(err: unknown): string {
+  if (!err || typeof err !== "object") return "Signup failed. Please try again.";
+  const anyErr = err as any;
+  const message = typeof anyErr.message === "string" ? anyErr.message : "Signup failed.";
+  const status = typeof anyErr.status === "number" ? anyErr.status : undefined;
+  const code = typeof anyErr.code === "string" ? anyErr.code : undefined;
+
+  // Common Supabase Auth cases
+  if (code === "email_address_invalid") {
+    return (
+      `${message} (status${status ? ` ${status}` : ""}, code ${code}) ` +
+      "This usually means your Supabase Auth settings are restricting which email addresses/domains can sign up. " +
+      "Check Supabase Dashboard → Authentication → Providers/Settings and any domain allow/deny list or bot/abuse protection rules (e.g. restricting public email domains)."
+    );
+  }
+  if (message.toLowerCase().includes("password")) {
+    return message;
+  }
+  if (message.toLowerCase().includes("captcha")) {
+    return (
+      message +
+      " (CAPTCHA is enabled in Supabase Auth. Either disable it in the dashboard or add a CAPTCHA token to the signUp request.)"
+    );
+  }
+  if (message.toLowerCase().includes("signups not allowed")) {
+    return message + " (Enable signups in Supabase Auth settings.)";
+  }
+
+  const suffix =
+    status || code ? ` (status${status ? ` ${status}` : ""}${code ? `, code ${code}` : ""})` : "";
+  return message + suffix;
+}
+
 export default function Signup() {
   const navigate = useNavigate();
   const [error, setError] = useState("");
@@ -22,10 +55,14 @@ export default function Signup() {
     const { data, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        // Helps Supabase know where to send users back after email confirmation flows.
+        emailRedirectTo: `${window.location.origin}/login`,
+      },
     });
 
     if (signUpError) {
-      setError(signUpError.message);
+      setError(formatSupabaseAuthError(signUpError));
       setStatus("idle");
       return;
     }
@@ -73,6 +110,8 @@ export default function Signup() {
                 name="email"
                 type="email"
                 autoComplete="email"
+                autoCapitalize="none"
+                autoCorrect="off"
                 required
                 disabled={isBusy || status === "check-email"}
                 placeholder="you@example.com"
@@ -92,13 +131,14 @@ export default function Signup() {
                 name="password"
                 type="password"
                 autoComplete="new-password"
+                minLength={6}
                 required
                 disabled={isBusy || status === "check-email"}
                 placeholder="••••••••"
                 className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 px-4 py-2.5 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none transition disabled:opacity-60 disabled:cursor-not-allowed"
               />
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                Use at least 8 characters.
+                Use at least 6 characters.
               </p>
             </div>
 

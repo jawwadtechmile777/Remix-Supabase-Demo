@@ -225,7 +225,7 @@ export default function Users() {
         <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Your users
+              Your People List
             </h2>
             <span className="text-sm text-gray-500 dark:text-gray-400">
               {Array.isArray(users) ? users.length : 0} total
